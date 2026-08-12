@@ -6,9 +6,14 @@ import requests
 import time
 from datetime import datetime
 
-st.set_page_config(page_title="JARVIS Dual Engine + Live Trade Tracker Bot", page_icon="🤖")
+st.set_page_config(page_title="JARVIS Dual Engine ICT Bot", page_icon="🤖")
 
-MAJOR_PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD"]
+# Updated Pair List with EURJPY, GBPJPY, AUDJPY
+MAJOR_PAIRS = [
+    "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD",
+    "EURJPY", "GBPJPY", "AUDJPY"
+]
+
 TELEGRAM_BOT_TOKEN = "8981472233:AAHHe9boaP0hsfZIcROcvMEmrF1Z-ymfSUg"
 TELEGRAM_CHAT_ID = "458226949"
 
@@ -35,17 +40,14 @@ def track_active_trades(pair, live_price):
 
         # BUY TRADE TRACKING
         if direction == 'BUY':
-            # Check Target Hit
             if live_price >= tp:
                 msg = f"🎉 *TARGET HIT ALERT (TP) - {pair}*\n\n🟢 *Entry:* `{entry}`\n🎯 *Target Hit:* `{live_price}`\n\n✅ *Status:* Trade Closed in Full Profit!"
                 send_telegram(msg)
                 del st.session_state.active_trades[pair]
-            # Check Stop Loss Hit
             elif live_price <= sl:
                 msg = f"⚠️ *STOP LOSS HIT ALERT (SL) - {pair}*\n\n🔴 *Entry:* `{entry}`\n🔻 *SL Hit Price:* `{live_price}`\n\n❌ *Status:* Trade Closed at Stop Loss."
                 send_telegram(msg)
                 del st.session_state.active_trades[pair]
-            # Check 1:1.5 RR Halfway Point (Break-Even Suggestion)
             elif not be_notified and live_price >= entry + (tp - entry) * 0.5:
                 msg = f"🛡️ *RISK-FREE TRADE ALERT - {pair}*\n\n🟢 *Entry:* `{entry}`\n📈 *Current Price:* `{live_price}`\n\n💡 *Action:* Trade is running in 1:1.5+ Profit. *Shift your Stop Loss to Entry Price (Break-Even)!*"
                 send_telegram(msg)
@@ -53,17 +55,14 @@ def track_active_trades(pair, live_price):
 
         # SELL TRADE TRACKING
         elif direction == 'SELL':
-            # Check Target Hit
             if live_price <= tp:
                 msg = f"🎉 *TARGET HIT ALERT (TP) - {pair}*\n\n🟢 *Entry:* `{entry}`\n🎯 *Target Hit:* `{live_price}`\n\n✅ *Status:* Trade Closed in Full Profit!"
                 send_telegram(msg)
                 del st.session_state.active_trades[pair]
-            # Check Stop Loss Hit
             elif live_price >= sl:
                 msg = f"⚠️ *STOP LOSS HIT ALERT (SL) - {pair}*\n\n🔴 *Entry:* `{entry}`\n🔻 *SL Hit Price:* `{live_price}`\n\n❌ *Status:* Trade Closed at Stop Loss."
                 send_telegram(msg)
                 del st.session_state.active_trades[pair]
-            # Check 1:1.5 RR Halfway Point
             elif not be_notified and live_price <= entry - (entry - tp) * 0.5:
                 msg = f"🛡️ *RISK-FREE TRADE ALERT - {pair}*\n\n🟢 *Entry:* `{entry}`\n📉 *Current Price:* `{live_price}`\n\n💡 *Action:* Trade is running in 1:1.5+ Profit. *Shift your Stop Loss to Entry Price (Break-Even)!*"
                 send_telegram(msg)
@@ -93,7 +92,6 @@ def scan_market():
             # --- TRACK ACTIVE TRADES FOR STATUS UPDATES ---
             track_active_trades(pair, live_price)
 
-            # Skip new scan for pair if already in active trade
             if pair in st.session_state.active_trades:
                 continue
 
@@ -204,14 +202,14 @@ def scan_market():
             continue
     return alerts_count
 
-st.title("🤖 JARVIS Dual Engine + Live Trade Tracker")
-st.success("24/7 Market Scanner & Auto Status Tracker Active! ✅")
+st.title("🤖 JARVIS Dual Engine ICT Bot (9 Pairs)")
+st.success("24/7 Scanning Active for 9 Pairs (Including EURJPY, GBPJPY, AUDJPY) ✅")
 
 if 'last_run' not in st.session_state:
     st.session_state.last_run = datetime.now()
-    send_telegram("🚀 *JARVIS Dual Engine + Live Trade Tracker (TP/SL/BE Tracking) Updated Successfully!*")
+    send_telegram("🚀 *JARVIS Bot Updated: Added EURJPY, GBPJPY, AUDJPY to Scanner! (9 Pairs Active)*")
 
-st.metric(label="System Status", value="Scanning Market & Active Positions 24/7")
+st.metric(label="System Status", value="Active & Scanning 9 Pairs 24/7")
 
 with st.spinner("Scanning Market & Active Trades..."):
     count = scan_market()
