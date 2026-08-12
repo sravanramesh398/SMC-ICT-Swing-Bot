@@ -6,11 +6,15 @@ import requests
 import time
 from datetime import datetime
 
-st.set_page_config(page_title="JARVIS Dual Engine ICT Swing Bot", page_icon="🤖")
+st.set_page_config(page_title="JARVIS Dual Engine + Live Trade Tracker Bot", page_icon="🤖")
 
 MAJOR_PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD"]
 TELEGRAM_BOT_TOKEN = "8981472233:AAHHe9boaP0hsfZIcROcvMEmrF1Z-ymfSUg"
 TELEGRAM_CHAT_ID = "458226949"
+
+# Session State for Live Active Trades Tracking
+if 'active_trades' not in st.session_state:
+    st.session_state.active_trades = {}
 
 def send_telegram(msg):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -19,6 +23,51 @@ def send_telegram(msg):
         requests.post(url, json=payload, timeout=5)
     except Exception:
         pass
+
+def track_active_trades(pair, live_price):
+    if pair in st.session_state.active_trades:
+        trade = st.session_state.active_trades[pair]
+        entry = trade['entry']
+        sl = trade['sl']
+        tp = trade['tp']
+        direction = trade['direction']
+        be_notified = trade.get('be_notified', False)
+
+        # BUY TRADE TRACKING
+        if direction == 'BUY':
+            # Check Target Hit
+            if live_price >= tp:
+                msg = f"🎉 *TARGET HIT ALERT (TP) - {pair}*\n\n🟢 *Entry:* `{entry}`\n🎯 *Target Hit:* `{live_price}`\n\n✅ *Status:* Trade Closed in Full Profit!"
+                send_telegram(msg)
+                del st.session_state.active_trades[pair]
+            # Check Stop Loss Hit
+            elif live_price <= sl:
+                msg = f"⚠️ *STOP LOSS HIT ALERT (SL) - {pair}*\n\n🔴 *Entry:* `{entry}`\n🔻 *SL Hit Price:* `{live_price}`\n\n❌ *Status:* Trade Closed at Stop Loss."
+                send_telegram(msg)
+                del st.session_state.active_trades[pair]
+            # Check 1:1.5 RR Halfway Point (Break-Even Suggestion)
+            elif not be_notified and live_price >= entry + (tp - entry) * 0.5:
+                msg = f"🛡️ *RISK-FREE TRADE ALERT - {pair}*\n\n🟢 *Entry:* `{entry}`\n📈 *Current Price:* `{live_price}`\n\n💡 *Action:* Trade is running in 1:1.5+ Profit. *Shift your Stop Loss to Entry Price (Break-Even)!*"
+                send_telegram(msg)
+                st.session_state.active_trades[pair]['be_notified'] = True
+
+        # SELL TRADE TRACKING
+        elif direction == 'SELL':
+            # Check Target Hit
+            if live_price <= tp:
+                msg = f"🎉 *TARGET HIT ALERT (TP) - {pair}*\n\n🟢 *Entry:* `{entry}`\n🎯 *Target Hit:* `{live_price}`\n\n✅ *Status:* Trade Closed in Full Profit!"
+                send_telegram(msg)
+                del st.session_state.active_trades[pair]
+            # Check Stop Loss Hit
+            elif live_price >= sl:
+                msg = f"⚠️ *STOP LOSS HIT ALERT (SL) - {pair}*\n\n🔴 *Entry:* `{entry}`\n🔻 *SL Hit Price:* `{live_price}`\n\n❌ *Status:* Trade Closed at Stop Loss."
+                send_telegram(msg)
+                del st.session_state.active_trades[pair]
+            # Check 1:1.5 RR Halfway Point
+            elif not be_notified and live_price <= entry - (entry - tp) * 0.5:
+                msg = f"🛡️ *RISK-FREE TRADE ALERT - {pair}*\n\n🟢 *Entry:* `{entry}`\n📉 *Current Price:* `{live_price}`\n\n💡 *Action:* Trade is running in 1:1.5+ Profit. *Shift your Stop Loss to Entry Price (Break-Even)!*"
+                send_telegram(msg)
+                st.session_state.active_trades[pair]['be_notified'] = True
 
 def scan_market():
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -41,8 +90,15 @@ def scan_market():
 
             live_price = round(df_15m['Close'].iloc[-1], 5)
 
+            # --- TRACK ACTIVE TRADES FOR STATUS UPDATES ---
+            track_active_trades(pair, live_price)
+
+            # Skip new scan for pair if already in active trade
+            if pair in st.session_state.active_trades:
+                continue
+
             # -------------------------------------------------------------
-            # ENGINE 1: DAILY SETUP + 1H SHIFT (Macro Swing Engine)
+            # ENGINE 1: DAILY SETUP + 1H SHIFT
             # -------------------------------------------------------------
             high_20 = df_daily['High'].iloc[-21:-1].max()
             low_20 = df_daily['Low'].iloc[-21:-1].min()
@@ -57,40 +113,46 @@ def scan_market():
 
             buffer_1h = 0.50 if "JPY" in pair else 0.00400
 
-            # Daily Buy + 1H Shift
+            # Engine 1 Buy
             if live_price < eq_50 and pdl < df_daily['Low'].iloc[-10:-2].min() and curr_close_1h > recent_1h_high:
                 sl_val = round(df_1h['Low'].iloc[-4:].min() - buffer_1h, 5)
+                tp_val = round(high_20, 5)
+                st.session_state.active_trades[pair] = {'direction': 'BUY', 'entry': live_price, 'sl': sl_val, 'tp': tp_val, 'be_notified': False}
+                
                 msg = (
                     f"🚀 *ENGINE 1: DAILY SETUP + 1H SHIFT (BUY)*\n\n"
                     f"🔹 *Pair:* `{pair}`\n"
                     f"🟢 *Entry Price:* `{live_price}`\n"
                     f"🔴 *Stop Loss:* `{sl_val}`\n"
-                    f"🎯 *Target (BSL):* `{round(high_20, 5)}`\n"
-                    f"📊 *Model:* `Daily Liquidity Sweep + 1H MSS Confirmation`\n\n"
+                    f"🎯 *Target (BSL):* `{tp_val}`\n"
+                    f"📊 *Model:* `Daily Sweep + 1H MSS`\n\n"
                     f"⏰ *Time:* `{now}`"
                 )
                 send_telegram(msg)
                 alerts_count += 1
 
-            # Daily Sell + 1H Shift
+            # Engine 1 Sell
             elif live_price > eq_50 and pdh > df_daily['High'].iloc[-10:-2].max() and curr_close_1h < recent_1h_low:
                 sl_val = round(df_1h['High'].iloc[-4:].max() + buffer_1h, 5)
+                tp_val = round(low_20, 5)
+                st.session_state.active_trades[pair] = {'direction': 'SELL', 'entry': live_price, 'sl': sl_val, 'tp': tp_val, 'be_notified': False}
+                
                 msg = (
                     f"🔻 *ENGINE 1: DAILY SETUP + 1H SHIFT (SELL)*\n\n"
                     f"🔹 *Pair:* `{pair}`\n"
                     f"🟢 *Entry Price:* `{live_price}`\n"
                     f"🔴 *Stop Loss:* `{sl_val}`\n"
-                    f"🎯 *Target (SSL):* `{round(low_20, 5)}`\n"
-                    f"📊 *Model:* `Daily Liquidity Sweep + 1H MSS Confirmation`\n\n"
+                    f"🎯 *Target (SSL):* `{tp_val}`\n"
+                    f"📊 *Model:* `Daily Sweep + 1H MSS`\n\n"
                     f"⏰ *Time:* `{now}`"
                 )
                 send_telegram(msg)
                 alerts_count += 1
 
             # -------------------------------------------------------------
-            # ENGINE 2: 4H SETUP + 15M SHIFT (Intra-Swing Engine)
+            # ENGINE 2: 4H SETUP + 15M SHIFT
             # -------------------------------------------------------------
-            if len(df_4h_res) >= 4:
+            elif len(df_4h_res) >= 4:
                 is_4h_bull_fvg = df_4h_res['High'].iloc[-4] < df_4h_res['Low'].iloc[-2]
                 is_4h_bear_fvg = df_4h_res['Low'].iloc[-4] > df_4h_res['High'].iloc[-2]
                 high_4h_sweep = df_4h_res['High'].iloc[-1] > df_4h_res['High'].iloc[-5:-1].max()
@@ -102,31 +164,37 @@ def scan_market():
 
                 buffer_15m = 0.20 if "JPY" in pair else 0.00150
 
-                # 4H Buy + 15M Shift
+                # Engine 2 Buy
                 if (is_4h_bull_fvg or low_4h_sweep) and curr_close_15m > recent_15m_high:
                     sl_val = round(df_15m['Low'].iloc[-4:].min() - buffer_15m, 5)
+                    tp_val = round(high_20, 5)
+                    st.session_state.active_trades[pair] = {'direction': 'BUY', 'entry': live_price, 'sl': sl_val, 'tp': tp_val, 'be_notified': False}
+                    
                     msg = (
                         f"🚀 *ENGINE 2: 4H SETUP + 15M SHIFT (BUY)*\n\n"
                         f"🔹 *Pair:* `{pair}`\n"
                         f"🟢 *Entry Price:* `{live_price}`\n"
                         f"🔴 *Stop Loss:* `{sl_val}`\n"
-                        f"🎯 *Target:* `{round(high_20, 5)}`\n"
-                        f"📊 *Model:* `4H FVG/Sweep + 15M High R:R MSS Shift`\n\n"
+                        f"🎯 *Target:* `{tp_val}`\n"
+                        f"📊 *Model:* `4H FVG/Sweep + 15M MSS`\n\n"
                         f"⏰ *Time:* `{now}`"
                     )
                     send_telegram(msg)
                     alerts_count += 1
 
-                # 4H Sell + 15M Shift
+                # Engine 2 Sell
                 elif (is_4h_bear_fvg or high_4h_sweep) and curr_close_15m < recent_15m_low:
                     sl_val = round(df_15m['High'].iloc[-4:].max() + buffer_15m, 5)
+                    tp_val = round(low_20, 5)
+                    st.session_state.active_trades[pair] = {'direction': 'SELL', 'entry': live_price, 'sl': sl_val, 'tp': tp_val, 'be_notified': False}
+                    
                     msg = (
                         f"🔻 *ENGINE 2: 4H SETUP + 15M SHIFT (SELL)*\n\n"
                         f"🔹 *Pair:* `{pair}`\n"
                         f"🟢 *Entry Price:* `{live_price}`\n"
                         f"🔴 *Stop Loss:* `{sl_val}`\n"
-                        f"🎯 *Target:* `{round(low_20, 5)}`\n"
-                        f"📊 *Model:* `4H FVG/Sweep + 15M High R:R MSS Shift`\n\n"
+                        f"🎯 *Target:* `{tp_val}`\n"
+                        f"📊 *Model:* `4H FVG/Sweep + 15M MSS`\n\n"
                         f"⏰ *Time:* `{now}`"
                     )
                     send_telegram(msg)
@@ -136,20 +204,20 @@ def scan_market():
             continue
     return alerts_count
 
-st.title("🤖 JARVIS 24/7 Dual Engine ICT Bot")
-st.success("Engine 1 (Daily+1H) & Engine 2 (4H+15M) Both Active! ✅")
+st.title("🤖 JARVIS Dual Engine + Live Trade Tracker")
+st.success("24/7 Market Scanner & Auto Status Tracker Active! ✅")
 
 if 'last_run' not in st.session_state:
     st.session_state.last_run = datetime.now()
-    send_telegram("🚀 *JARVIS Dual Engine Bot Active: Engine 1 (Daily+1H) & Engine 2 (4H+15M)*")
+    send_telegram("🚀 *JARVIS Dual Engine + Live Trade Tracker (TP/SL/BE Tracking) Updated Successfully!*")
 
-st.metric(label="System Status", value="Active & Scanning 24/7")
+st.metric(label="System Status", value="Scanning Market & Active Positions 24/7")
 
-with st.spinner("Scanning Market..."):
+with st.spinner("Scanning Market & Active Trades..."):
     count = scan_market()
 
 st.write(f"Last scanned at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-st.write(f"Alerts dispatched in this cycle: {count}")
+st.write(f"Active Trades Being Tracked: {len(st.session_state.active_trades)}")
 
 time.sleep(3600)
 st.rerun()
