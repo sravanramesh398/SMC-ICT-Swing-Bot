@@ -135,12 +135,21 @@ def scan_market():
 
             buffer_1h = 0.50 if "JPY" in pair else 0.00400
 
+            # Daily FVG Calculation for Engine 1
+            is_daily_bull_fvg = df_daily['High'].iloc[-4] < df_daily['Low'].iloc[-2] if len(df_daily) >= 4 else False
+            is_daily_bear_fvg = df_daily['Low'].iloc[-4] > df_daily['High'].iloc[-2] if len(df_daily) >= 4 else False
+
             # -------------------------------------------------------------
-            # ENGINE 1: DAILY SETUP + 1H SHIFT
+            # ENGINE 1: DAILY SETUP (SWEEP OR FVG TAP) + 1H SHIFT
             # -------------------------------------------------------------
-            if live_price < eq_50 and pdl < df_daily['Low'].iloc[-10:-2].min() and curr_close_1h > recent_1h_high:
+            daily_buy_sweep = (live_price < eq_50 and pdl < df_daily['Low'].iloc[-10:-2].min())
+            daily_buy_fvg = (is_daily_bull_fvg and live_price <= df_daily['Low'].iloc[-2] and live_price >= df_daily['High'].iloc[-4])
+
+            if (daily_buy_sweep or daily_buy_fvg) and curr_close_1h > recent_1h_high:
                 sl_val = round(df_1h['Low'].iloc[-4:].min() - buffer_1h, 5)
                 tp_val = round(high_20, 5)
+                model_used = "Daily FVG Tap + 1H MSS" if daily_buy_fvg else "Daily Sweep + 1H MSS"
+                
                 st.session_state.active_trades[pair] = {'direction': 'BUY', 'entry': live_price, 'sl': sl_val, 'tp': tp_val, 'be_notified': False}
                 
                 msg = (
@@ -149,16 +158,21 @@ def scan_market():
                     f"🟢 *Entry Price:* `{live_price}`\n"
                     f"🔴 *Stop Loss:* `{sl_val}`\n"
                     f"🎯 *Target (BSL):* `{tp_val}`\n"
-                    f"📊 *Model:* `Daily Sweep + 1H MSS`\n"
+                    f"📊 *Model:* `{model_used}`\n"
                     f"🧭 *Daily Trend:* `{daily_trend}`\n\n"
                     f"⏰ *Time:* `{now}`"
                 )
                 send_telegram(msg)
                 alerts_count += 1
 
-            elif live_price > eq_50 and pdh > df_daily['High'].iloc[-10:-2].max() and curr_close_1h < recent_1h_low:
+            daily_sell_sweep = (live_price > eq_50 and pdh > df_daily['High'].iloc[-10:-2].max())
+            daily_sell_fvg = (is_daily_bear_fvg and live_price >= df_daily['High'].iloc[-2] and live_price <= df_daily['Low'].iloc[-4])
+
+            if (daily_sell_sweep or daily_sell_fvg) and curr_close_1h < recent_1h_low:
                 sl_val = round(df_1h['High'].iloc[-4:].max() + buffer_1h, 5)
                 tp_val = round(low_20, 5)
+                model_used = "Daily FVG Tap + 1H MSS" if daily_sell_fvg else "Daily Sweep + 1H MSS"
+                
                 st.session_state.active_trades[pair] = {'direction': 'SELL', 'entry': live_price, 'sl': sl_val, 'tp': tp_val, 'be_notified': False}
                 
                 msg = (
@@ -167,7 +181,7 @@ def scan_market():
                     f"🟢 *Entry Price:* `{live_price}`\n"
                     f"🔴 *Stop Loss:* `{sl_val}`\n"
                     f"🎯 *Target (SSL):* `{tp_val}`\n"
-                    f"📊 *Model:* `Daily Sweep + 1H MSS`\n"
+                    f"📊 *Model:* `{model_used}`\n"
                     f"🧭 *Daily Trend:* `{daily_trend}`\n\n"
                     f"⏰ *Time:* `{now}`"
                 )
@@ -178,7 +192,6 @@ def scan_market():
             # ENGINE 2: 4H SETUP + 15M SHIFT (WITH DAILY TREND & 4H ARRAY FILTER)
             # -------------------------------------------------------------
             elif len(df_4h_res) >= 20:
-                # FILTER 4: 4H PREMIUM / DISCOUNT ARRAY CALCULATOR
                 high_4h_20 = df_4h_res['High'].iloc[-20:].max()
                 low_4h_20 = df_4h_res['Low'].iloc[-20:].min()
                 eq_4h_50 = low_4h_20 + (high_4h_20 - low_4h_20) * 0.50
@@ -239,11 +252,11 @@ def scan_market():
     return alerts_count
 
 st.title("🤖 JARVIS Ultra High-Accuracy ICT Bot")
-st.success("System Live with Daily Trend, News Filter & 4H Premium/Discount Array Active! ✅")
+st.success("System Live with Daily Sweep/FVG, Daily Trend, News & 4H Array Active! ✅")
 
 if 'last_run' not in st.session_state:
     st.session_state.last_run = datetime.now()
-    send_telegram("⚡ *JARVIS Bot System Upgraded: 4H Premium/Discount Array Applied! (Targeting ~78% Win Rate)*")
+    send_telegram("⚡ *JARVIS Bot System Upgraded: Daily FVG Tap Condition Added to Engine 1! (Targeting ~80% Win Rate)*")
 
 st.metric(label="System Status", value="Active & Scanning 9 Pairs 24/7")
 
