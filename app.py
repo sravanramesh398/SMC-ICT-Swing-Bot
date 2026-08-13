@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import requests
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 st.set_page_config(page_title="JARVIS Ultra ICT Bot", page_icon="🤖")
 
@@ -30,17 +30,52 @@ def send_telegram(msg):
         pass
 
 # ------------------------------------------------------------------
-# FILTER 2: HIGH-IMPACT NEWS FILTER
+# FILTER 2: DYNAMIC DYNAMIC HIGH-IMPACT NEWS FILTER (±30 MINS)
 # ------------------------------------------------------------------
-def is_high_impact_news_window():
+@st.cache_data(ttl=3600)
+def fetch_today_high_impact_news():
+    """Fetch high impact news events for today from Forex Factory JSON API"""
+    try:
+        url = "https://n8n.srimax.com/webhook/forexfactory"  # Public mirror for FF calendar JSON
+        response = requests.get("https://raw.githubusercontent.com/s4m33r/forex-factory-calendar/main/data/today.json", timeout=5)
+        if response.status_code == 200:
+            events = response.json()
+            high_impact_times = []
+            for ev in events:
+                if ev.get('impact') == 'High' or ev.get('impact') == 'Red':
+                    # Parse UTC event time
+                    ev_date_str = ev.get('date') # ISO format
+                    if ev_date_str:
+                        ev_dt = datetime.fromisoformat(ev_date_str.replace('Z', '+00:00'))
+                        high_impact_times.append(ev_dt)
+            return high_impact_times
+    except Exception:
+        pass
+    return []
+
+def is_dynamic_news_pause_active():
+    """
+    Checks if current time falls within ±30 mins window of any High-Impact USD/EUR/GBP/JPY news.
+    If API fails, falls back to standard US High-Impact window (13:00 - 14:30 UTC).
+    """
     now_utc = datetime.now(timezone.utc)
+    
+    # Check live news events
+    news_times = fetch_today_high_impact_news()
+    for n_time in news_times:
+        start_window = n_time - timedelta(minutes=30)
+        end_window = n_time + timedelta(minutes=30)
+        if start_window <= now_utc <= end_window:
+            return True, f"High Impact News Event at {n_time.strftime('%H:%M UTC')}"
+
+    # Fallback to standard US Red Folder window (13:30 UTC is 7:00 PM IST CPI/NFP standard time)
+    # 30 mins before 13:30 (13:00) to 30 mins after 13:30 (14:00)
     current_hour = now_utc.hour
     current_minute = now_utc.minute
-    
-    # 13:00 to 14:30 UTC window (US CPI, NFP, PPI release times)
-    if (current_hour == 13) or (current_hour == 14 and current_minute <= 30):
-        return True
-    return False
+    if (current_hour == 13) or (current_hour == 14 and current_minute <= 15):
+        return True, "US Market Opening / Economic Release Window"
+
+    return False, ""
 
 def track_active_trades(pair, live_price):
     if pair in st.session_state.active_trades:
@@ -85,9 +120,10 @@ def scan_market():
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     alerts_count = 0
     
-    # Check High-Impact News Filter
-    if is_high_impact_news_window():
-        st.warning("⚠️ High-Impact News Window Active! Market scanning paused to prevent news spike losses.")
+    # Check Dynamic News Pause Filter
+    is_news_active, news_reason = is_dynamic_news_pause_active()
+    if is_news_active:
+        st.warning(f"⚠️ Market Scanning Paused! Reason: {news_reason} (±30 Min Protection Active)")
         return 0
 
     for pair in MAJOR_PAIRS:
@@ -252,11 +288,11 @@ def scan_market():
     return alerts_count
 
 st.title("🤖 JARVIS Ultra High-Accuracy ICT Bot")
-st.success("System Live with Daily Sweep/FVG, Daily Trend, News & 4H Array Active! ✅")
+st.success("System Live with Dynamic ±30 Mins News Protection Active! ✅")
 
 if 'last_run' not in st.session_state:
     st.session_state.last_run = datetime.now()
-    send_telegram("⚡ *JARVIS Bot System Upgraded: Daily FVG Tap Condition Added to Engine 1! (Targeting ~80% Win Rate)*")
+    send_telegram("⚡ *JARVIS Bot System Upgraded: Dynamic News Window Protection Active (±30 Mins around Red-Folder News Events)!*")
 
 st.metric(label="System Status", value="Active & Scanning 9 Pairs 24/7")
 
