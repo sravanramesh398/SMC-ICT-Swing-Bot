@@ -1,6 +1,6 @@
 import requests
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from tradingview_ta import TA_Handler, Interval
 
 # --- BOT CONFIGURATION ---
@@ -12,18 +12,30 @@ PAIRS = [
     "EURJPY", "GBPJPY", "AUDJPY"
 ]
 
-def send_telegram_alert(pair, setup_title, session_name, sweep_level, current_price, details):
-    """Sends Clean SMC Intraday Alert with Killzone & Body Rejection Confirmation"""
+def send_telegram_alert(pair, setup_title, session_name, direction, entry, sl, tp1, tp2, sweep_level, details):
+    """Sends Pro SMC Intraday Alert with Full Execution Rules & Risk Management"""
+    dir_icon = "🟢 *BUY (BULLISH REVERSAL)*" if direction == "BUY" else "🔴 *SELL (BEARISH REVERSAL)*"
+    
     message = f"""
-🔥 *INTRADAY SMC SETUP* 🔥
+🔥 *INTRADAY SMC SNIPER SETUP* 🔥
 ───────────────────────
 📊 *Pair:* `{pair}`
 ⚡ *Setup:* {setup_title}
-🏛️ *Session / Killzone:* `{session_name}`
+🧭 *Direction:* {dir_icon}
+🏛️ *Session:* `{session_name}`
 🎯 *Level Swept:* `{sweep_level}`
-💵 *Current Price:* `{current_price}`
 ───────────────────────
-🔍 *Confirmation:* `{details}`
+💵 *Execution Price:* `{entry}`
+🛑 *Stop Loss (SL):* `{sl}`
+🎯 *TP 1 (1:2 RR):* `{tp1}` *(Shift SL to Break-Even here)*
+🎯 *TP 2 (1:3+ RR / Target):* `{tp2}`
+───────────────────────
+📋 *EXECUTION RULES:*
+1️⃣ *Confirmation:* {details}
+2️⃣ *Entry:* Wait for 5M/1M MSS & Enter on FVG retracement.
+3️⃣ *Risk Rule:* Maximum 1% - 2% Risk per trade.
+4️⃣ *Trade Mgmt:* Move SL to Entry when TP1 is hit.
+───────────────────────
 ⏰ *Time:* {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} IST
 """
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -85,7 +97,7 @@ def get_pair_analysis(symbol):
 
 def main():
     print("==================================================================")
-    print("   🤖 SMC INTRADAY BOT (KILLZONES + CANDLE REJECTION / MSS)")
+    print("   🤖 SMC INTRADAY BOT WITH COMPLETE 3-RULE EXECUTION ENGINE")
     print("==================================================================")
     
     session = get_current_killzone()
@@ -103,59 +115,97 @@ def main():
         pdh = data["pdh"]
         pdl = data["pdl"]
 
+        # JPY pairs vs Standard pip buffer
+        buffer = 0.15 if "JPY" in pair else 0.00150
+
         # -------------------------------------------------------------
-        # 1. PDH SWEEP + BODY REJECTION (BEARISH REVERSAL)
-        # High swept above PDH, but Candle Closed BELOW PDH (Wick Sweep)
+        # RULE 1 & 2: PDH SWEEP + BODY REJECTION (SELL SHORT)
         # -------------------------------------------------------------
         if high >= pdh and price < pdh:
+            sl = round(high + buffer, 5)
+            risk = abs(sl - price)
+            tp1 = round(price - (risk * 2), 5)
+            tp2 = round(price - (risk * 3), 5)
+            
             print(f"🚨 {pair} Swept PDH with Rejection Body!")
             send_telegram_alert(
                 pair=pair,
-                setup_title="PDH LIQUIDITY PURGED 🔴 (BEARISH REJECTION)",
+                setup_title="PDH LIQUIDITY PURGED 🔴 (BEARISH REVERSAL)",
                 session_name=session,
+                direction="SELL",
+                entry=price,
+                sl=sl,
+                tp1=tp1,
+                tp2=tp2,
                 sweep_level=pdh,
-                current_price=price,
-                details="15M Wick swept High, but body closed back below PDH (MSS shift potential)"
+                details="15M Wick swept PDH, candle closed inside (Bearish MSS shift)"
             )
 
         # -------------------------------------------------------------
-        # 2. PDL SWEEP + BODY REJECTION (BULLISH REVERSAL)
-        # Low swept below PDL, but Candle Closed ABOVE PDL (Wick Sweep)
+        # RULE 1 & 2: PDL SWEEP + BODY REJECTION (BUY LONG)
         # -------------------------------------------------------------
         elif low <= pdl and price > pdl:
+            sl = round(low - buffer, 5)
+            risk = abs(price - sl)
+            tp1 = round(price + (risk * 2), 5)
+            tp2 = round(price + (risk * 3), 5)
+
             print(f"🚨 {pair} Swept PDL with Rejection Body!")
             send_telegram_alert(
                 pair=pair,
-                setup_title="PDL LIQUIDITY PURGED 🟢 (BULLISH REJECTION)",
+                setup_title="PDL LIQUIDITY PURGED 🟢 (BULLISH REVERSAL)",
                 session_name=session,
+                direction="BUY",
+                entry=price,
+                sl=sl,
+                tp1=tp1,
+                tp2=tp2,
                 sweep_level=pdl,
-                current_price=price,
-                details="15M Wick swept Low, but body closed back above PDL (MSS shift potential)"
+                details="15M Wick swept PDL, candle closed inside (Bullish MSS shift)"
             )
 
         # -------------------------------------------------------------
-        # 3. KILLZONE HIGH/LOW SWEEP (Inside London/NY Killzones)
+        # RULE 3: KILLZONE HIGH/LOW SWEEP WITH SESSION LIQUIDITY
         # -------------------------------------------------------------
         elif "Killzone" in session:
-            # High Sweep during Killzone with Bearish Close
+            # Killzone High Sweep (SELL)
             if high >= pdh * 0.9997 and price < open_p:
+                sl = round(high + buffer, 5)
+                risk = abs(sl - price)
+                tp1 = round(price - (risk * 2), 5)
+                tp2 = round(price - (risk * 3), 5)
+
                 send_telegram_alert(
                     pair=pair,
                     setup_title=f"{session.split()[0]} HIGH SWEEP 🔴",
                     session_name=session,
+                    direction="SELL",
+                    entry=price,
+                    sl=sl,
+                    tp1=tp1,
+                    tp2=tp2,
                     sweep_level=high,
-                    current_price=price,
-                    details="Killzone High swept with Bearish Candle Close rejection"
+                    details="Killzone High swept with Bearish Rejection Close"
                 )
-            # Low Sweep during Killzone with Bullish Close
+
+            # Killzone Low Sweep (BUY)
             elif low <= pdl * 1.0003 and price > open_p:
+                sl = round(low - buffer, 5)
+                risk = abs(price - sl)
+                tp1 = round(price + (risk * 2), 5)
+                tp2 = round(price + (risk * 3), 5)
+
                 send_telegram_alert(
                     pair=pair,
                     setup_title=f"{session.split()[0]} LOW SWEEP 🟢",
                     session_name=session,
+                    direction="BUY",
+                    entry=price,
+                    sl=sl,
+                    tp1=tp1,
+                    tp2=tp2,
                     sweep_level=low,
-                    current_price=price,
-                    details="Killzone Low swept with Bullish Candle Close rejection"
+                    details="Killzone Low swept with Bullish Rejection Close"
                 )
 
         time.sleep(1.0)
