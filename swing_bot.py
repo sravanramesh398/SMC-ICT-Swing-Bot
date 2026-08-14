@@ -15,9 +15,19 @@ MAJOR_PAIRS = [
 
 def send_telegram_alert(pair, direction, entry, sl, tp1, tp2, sweep_level, details):
     """Sends Optimized SMC Swing Trade Alert with 1:2 & 1:3 RR Targets"""
-    dir_icon = "🟢 *BUY (BULLISH REVERSAL)*" if direction == "BUY" else "🔴 *SELL (BEARISH REVERSAL)*"
-    
-    msg = f"""
+    if direction == "STARTUP":
+        msg = f"""
+🤖 *SMC SWING BOT UPDATED & RUNNING* ✅
+───────────────────────
+📊 *Engine:* `Daily Sweep + 1H MSS (1:2 & 1:3 RR)`
+⏰ *Active Time:* `{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} IST`
+🎯 *Status:* Scanning 9 Pairs for HTF Swing Setups...
+───────────────────────
+_Targeting High Probability Daily Liquidity Raids!_
+"""
+    else:
+        dir_icon = "🟢 *BUY (BULLISH REVERSAL)*" if direction == "BUY" else "🔴 *SELL (BEARISH REVERSAL)*"
+        msg = f"""
 🚀 *OPTIMIZED SMC SWING SETUP* 🚀
 ───────────────────────
 📊 *Pair:* `{pair}`
@@ -64,6 +74,9 @@ def main():
     print("   🤖 SMC OPTIMIZED SWING BOT (DAILY SWEEP + 1H MSS ENGINE)")
     print("==================================================================")
     print(f"[{datetime.now().strftime('%H:%M:%S')} IST] Scanning 9 Pairs for High-Probability Swing Setups...")
+
+    # Startup Ping to confirm Telegram integration
+    send_telegram_alert("STATUS", "STARTUP", 0, 0, 0, 0, "N/A", "Bot is live")
 
     for pair in MAJOR_PAIRS:
         try:
