@@ -14,9 +14,11 @@ PAIRS = [
 
 def send_telegram_alert(pair, setup_title, session_name, direction, entry, sl, tp1, tp2, sweep_level, details):
     """Sends Pro SMC Intraday Alert with Full Execution Rules & Risk Management"""
-    dir_icon = "🟢 *BUY (BULLISH REVERSAL)*" if direction == "BUY" else "🔴 *SELL (BEARISH REVERSAL)*"
-    
-    message = f"""
+    if direction == "SCAN":
+        message = f"🤖 *JARVIS SMC BOT IS LIVE & SCANNING* ✅\n───────────────────────\n🏛️ *Active Session:* `{session_name}`\n⏰ *Scan Time:* `{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} IST`\n📊 *Monitoring:* 9 Major & Cross Forex Pairs\n───────────────────────\n_Waiting for High Probability Liquidity Sweeps..._"
+    else:
+        dir_icon = "🟢 *BUY (BULLISH REVERSAL)*" if direction == "BUY" else "🔴 *SELL (BEARISH REVERSAL)*"
+        message = f"""
 🔥 *INTRADAY SMC SNIPER SETUP* 🔥
 ───────────────────────
 📊 *Pair:* `{pair}`
@@ -101,7 +103,11 @@ def main():
     print("==================================================================")
     
     session = get_current_killzone()
-    print(f"[{datetime.now().strftime('%H:%M:%S')} IST] Active Zone: {session} | Scanning 9 Pairs...")
+    now_str = datetime.now().strftime('%H:%M:%S')
+    print(f"[{now_str} IST] Active Zone: {session} | Scanning 9 Pairs...")
+
+    # Heartbeat / Startup ping to confirm Telegram connection is active
+    send_telegram_alert("STATUS", "BOT RUNNING", session, "SCAN", 0, 0, 0, 0, "N/A", "")
 
     for pair in PAIRS:
         data = get_pair_analysis(pair)
