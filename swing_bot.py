@@ -1,151 +1,135 @@
-import yfinance as yf
-import pandas as pd
-import numpy as np
 import requests
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
+from tradingview_ta import TA_Handler, Interval
 
+# --- BOT CONFIGURATION ---
+BOT_TOKEN = "8981472233:AAHHe9boaP0hsfZIcROcvMEmrF1Z-ymfSUg"
+CHAT_ID = "458226949"
+
+# 9 Major & Cross Pairs
 MAJOR_PAIRS = [
     "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD",
     "EURJPY", "GBPJPY", "AUDJPY"
 ]
 
-TELEGRAM_BOT_TOKEN = "8981472233:AAHHe9boaP0hsfZIcROcvMEmrF1Z-ymfSUg"
-TELEGRAM_CHAT_ID = "458226949"
-
-def send_telegram(msg):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"}
+def send_telegram_alert(pair, engine_name, direction, entry, sl, tp, trend, model):
+    """Sends SMC Swing Trade Telegram Alert"""
+    icon = "🟢 *BUY SETUP*" if direction == "BUY" else "🔴 *SELL SETUP*"
+    
+    msg = f"""
+🚀 *SMC SWING TRADE ALERT* 🚀
+───────────────────────
+📊 *Pair:* `{pair}`
+⚡ *Engine:* `{engine_name}`
+🧭 *Direction:* {icon}
+📈 *Trend Bias:* `{trend}`
+───────────────────────
+💵 *Entry Price:* `{entry}`
+🛑 *Stop Loss (SL):* `{sl}`
+🎯 *Take Profit (TP):* `{tp}`
+📊 *Model:* `{model}`
+───────────────────────
+⏰ *Time:* {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} IST
+💡 *Swing Rule:* Target HTF Key Levels / Liquidity!
+"""
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}
     try:
         requests.post(url, json=payload, timeout=10)
     except Exception as e:
-        print(f"Telegram Error: {e}")
+        print(f"Telegram Send Error: {e}")
 
-def fetch_today_high_impact_news():
+def get_data(symbol, interval):
+    """Safely fetch market data using TradingView TA"""
     try:
-        response = requests.get("https://raw.githubusercontent.com/s4m33r/forex-factory-calendar/main/data/today.json", timeout=5)
-        if response.status_code == 200:
-            events = response.json()
-            high_impact_times = []
-            for ev in events:
-                if ev.get('impact') in ['High', 'Red']:
-                    ev_date_str = ev.get('date')
-                    if ev_date_str:
-                        ev_dt = datetime.fromisoformat(ev_date_str.replace('Z', '+00:00'))
-                        high_impact_times.append(ev_dt)
-            return high_impact_times
-    except Exception:
-        pass
-    return []
+        handler = TA_Handler(
+            symbol=symbol,
+            exchange="FOREXCOM",
+            screener="forex",
+            interval=interval
+        )
+        analysis = handler.get_analysis()
+        return analysis.indicators
+    except Exception as e:
+        print(f"Fetch Error {symbol} on {interval}: {e}")
+        return None
 
-def is_dynamic_news_pause_active():
-    now_utc = datetime.now(timezone.utc)
-    news_times = fetch_today_high_impact_news()
-    for n_time in news_times:
-        if (n_time - timedelta(minutes=30)) <= now_utc <= (n_time + timedelta(minutes=30)):
-            return True, f"High Impact News Event at {n_time.strftime('%H:%M UTC')}"
-
-    if (now_utc.hour == 13) or (now_utc.hour == 14 and now_utc.minute <= 15):
-        return True, "US Market Opening / Economic Release Window"
-
-    return False, ""
-
-def scan_market():
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    is_news_active, news_reason = is_dynamic_news_pause_active()
-    if is_news_active:
-        print(f"⚠️ Market Scanning Paused! Reason: {news_reason}")
-        return
+def main():
+    print("==================================================================")
+    print("   🤖 SMC PRO SWING BOT (MULTI-TIMEFRAME ENGINE RUNNING)")
+    print("==================================================================")
+    print(f"[{datetime.now().strftime('%H:%M:%S')} IST] Scanning 9 Pairs for Swing Setups...")
 
     for pair in MAJOR_PAIRS:
         try:
-            ticker = f"{pair}=X"
-            df_daily = yf.Ticker(ticker).history(period="60d", interval="1d")
-            df_1h = yf.Ticker(ticker).history(period="10d", interval="1h")
-            df_15m = yf.Ticker(ticker).history(period="5d", interval="15m")
+            # Multi-Timeframe Data
+            d_ind = get_data(pair, Interval.INTERVAL_1_DAY)
+            h4_ind = get_data(pair, Interval.INTERVAL_4_HOURS)
+            h1_ind = get_data(pair, Interval.INTERVAL_1_HOUR)
+            m15_ind = get_data(pair, Interval.INTERVAL_15_MINUTES)
 
-            if df_daily.empty or df_1h.empty or df_15m.empty or len(df_daily) < 20:
+            if not d_ind or not h4_ind or not h1_ind or not m15_ind:
                 continue
 
-            df_4h_res = df_1h.resample('4h').agg({
-                'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last'
-            }).dropna()
+            live_price = round(m15_ind["close"], 5)
+            
+            # --- HTF DAILY BIAS ---
+            daily_ema20 = d_ind.get("EMA20", d_ind["close"])
+            daily_trend = "BULLISH" if d_ind["close"] >= daily_ema20 else "BEARISH"
+            pdh = round(d_ind["high"], 5)
+            pdl = round(d_ind["low"], 5)
 
-            live_price = round(df_15m['Close'].iloc[-1], 5)
+            # --- 4H DATA ---
+            high_4h = round(h4_ind["high"], 5)
+            low_4h = round(h4_ind["low"], 5)
+            eq_4h = round(low_4h + (high_4h - low_4h) * 0.5, 5)
 
-            # Trend & Levels
-            daily_ema20 = df_daily['Close'].ewm(span=20, adjust=False).mean().iloc[-1]
-            daily_trend = "BULLISH" if df_daily['Close'].iloc[-1] > daily_ema20 else "BEARISH"
+            # --- 1H / 15M DATA ---
+            high_1h = round(h1_ind["high"], 5)
+            low_1h = round(h1_ind["low"], 5)
+            close_1h = round(h1_ind["close"], 5)
+            open_15m = round(m15_ind["open"], 5)
+            close_15m = round(m15_ind["close"], 5)
 
-            high_20 = df_daily['High'].iloc[-21:-1].max()
-            low_20 = df_daily['Low'].iloc[-21:-1].min()
-            eq_50 = low_20 + (high_20 - low_20) * 0.50
-            pdh = df_daily['High'].iloc[-2]
-            pdl = df_daily['Low'].iloc[-2]
+            pip_buffer = 0.25 if "JPY" in pair else 0.00250
 
-            curr_close_1h = df_1h['Close'].iloc[-1]
-            recent_1h_high = df_1h['High'].iloc[-4:-1].max()
-            recent_1h_low = df_1h['Low'].iloc[-4:-1].min()
-            buffer_1h = 0.50 if "JPY" in pair else 0.00400
+            # -------------------------------------------------------------
+            # ENGINE 1: DAILY SETUP + 1H STRUCTURE SHIFT
+            # -------------------------------------------------------------
+            # Engine 1 Buy: Daily Low Sweep + 1H Shift
+            if live_price > pdl and h1_ind["low"] <= pdl and close_1h > high_1h * 0.9995:
+                sl = round(low_1h - pip_buffer, 5)
+                tp = round(pdh, 5)
+                send_telegram_alert(pair, "ENGINE 1 (Daily + 1H)", "BUY", live_price, sl, tp, daily_trend, "Daily Sweep + 1H MSS")
 
-            is_daily_bull_fvg = df_daily['High'].iloc[-4] < df_daily['Low'].iloc[-2] if len(df_daily) >= 4 else False
-            is_daily_bear_fvg = df_daily['Low'].iloc[-4] > df_daily['High'].iloc[-2] if len(df_daily) >= 4 else False
+            # Engine 1 Sell: Daily High Sweep + 1H Shift
+            elif live_price < pdh and h1_ind["high"] >= pdh and close_1h < low_1h * 1.0005:
+                sl = round(high_1h + pip_buffer, 5)
+                tp = round(pdl, 5)
+                send_telegram_alert(pair, "ENGINE 1 (Daily + 1H)", "SELL", live_price, sl, tp, daily_trend, "Daily Sweep + 1H MSS")
 
-            # Engine 1 Buy
-            daily_buy_sweep = (live_price < eq_50 and pdl < df_daily['Low'].iloc[-10:-2].min())
-            daily_buy_fvg = (is_daily_bull_fvg and live_price <= df_daily['Low'].iloc[-2] and live_price >= df_daily['High'].iloc[-4])
+            # -------------------------------------------------------------
+            # ENGINE 2: 4H DISCOUNT/PREMIUM + 15M ENTRY SHIFT
+            # -------------------------------------------------------------
+            # Engine 2 Buy: Bullish Trend + 4H Discount Zone (<50%) + 15M Shift
+            if daily_trend == "BULLISH" and live_price < eq_4h and close_15m > open_15m and m15_ind["high"] >= high_1h * 0.9995:
+                sl = round(low_4h - pip_buffer, 5)
+                tp = round(high_4h, 5)
+                send_telegram_alert(pair, "ENGINE 2 (4H + 15M)", "BUY", live_price, sl, tp, daily_trend, "4H Discount + 15M MSS")
 
-            if (daily_buy_sweep or daily_buy_fvg) and curr_close_1h > recent_1h_high:
-                sl_val = round(df_1h['Low'].iloc[-4:].min() - buffer_1h, 5)
-                tp_val = round(high_20, 5)
-                model_used = "Daily FVG Tap + 1H MSS" if daily_buy_fvg else "Daily Sweep + 1H MSS"
-                msg = f"🚀 *ENGINE 1: SWING (BUY)*\n\n🔹 *Pair:* `{pair}`\n🟢 *Entry:* `{live_price}`\n🔴 *SL:* `{sl_val}`\n🎯 *TP:* `{tp_val}`\n📊 *Model:* `{model_used}`\n🧭 *Trend:* `{daily_trend}`\n⏰ *Time:* `{now}` IST"
-                send_telegram(msg)
+            # Engine 2 Sell: Bearish Trend + 4H Premium Zone (>50%) + 15M Shift
+            elif daily_trend == "BEARISH" and live_price > eq_4h and close_15m < open_15m and m15_ind["low"] <= low_1h * 1.0005:
+                sl = round(high_4h + pip_buffer, 5)
+                tp = round(low_4h, 5)
+                send_telegram_alert(pair, "ENGINE 2 (4H + 15M)", "SELL", live_price, sl, tp, daily_trend, "4H Premium + 15M MSS")
 
-            # Engine 1 Sell
-            daily_sell_sweep = (live_price > eq_50 and pdh > df_daily['High'].iloc[-10:-2].max())
-            daily_sell_fvg = (is_daily_bear_fvg and live_price >= df_daily['High'].iloc[-2] and live_price <= df_daily['Low'].iloc[-4])
-
-            if (daily_sell_sweep or daily_sell_fvg) and curr_close_1h < recent_1h_low:
-                sl_val = round(df_1h['High'].iloc[-4:].max() + buffer_1h, 5)
-                tp_val = round(low_20, 5)
-                model_used = "Daily FVG Tap + 1H MSS" if daily_sell_fvg else "Daily Sweep + 1H MSS"
-                msg = f"🔻 *ENGINE 1: SWING (SELL)*\n\n🔹 *Pair:* `{pair}`\n🟢 *Entry:* `{live_price}`\n🔴 *SL:* `{sl_val}`\n🎯 *TP:* `{tp_val}`\n📊 *Model:* `{model_used}`\n🧭 *Trend:* `{daily_trend}`\n⏰ *Time:* `{now}` IST"
-                send_telegram(msg)
-
-            # Engine 2: 4H + 15M Logic
-            if len(df_4h_res) >= 20:
-                high_4h_20 = df_4h_res['High'].iloc[-20:].max()
-                low_4h_20 = df_4h_res['Low'].iloc[-20:].min()
-                eq_4h_50 = low_4h_20 + (high_4h_20 - low_4h_20) * 0.50
-
-                is_4h_bull_fvg = df_4h_res['High'].iloc[-4] < df_4h_res['Low'].iloc[-2]
-                is_4h_bear_fvg = df_4h_res['Low'].iloc[-4] > df_4h_res['High'].iloc[-2]
-                high_4h_sweep = df_4h_res['High'].iloc[-1] > df_4h_res['High'].iloc[-5:-1].max()
-                low_4h_sweep = df_4h_res['Low'].iloc[-1] < df_4h_res['Low'].iloc[-5:-1].min()
-
-                curr_close_15m = df_15m['Close'].iloc[-1]
-                recent_15m_high = df_15m['High'].iloc[-4:-1].max()
-                recent_15m_low = df_15m['Low'].iloc[-4:-1].min()
-                buffer_15m = 0.20 if "JPY" in pair else 0.00150
-
-                if daily_trend == "BULLISH" and live_price < eq_4h_50 and (is_4h_bull_fvg or low_4h_sweep) and curr_close_15m > recent_15m_high:
-                    sl_val = round(df_15m['Low'].iloc[-4:].min() - buffer_15m, 5)
-                    tp_val = round(high_20, 5)
-                    msg = f"🚀 *ENGINE 2: 4H SWING (BUY)*\n\n🔹 *Pair:* `{pair}`\n🟢 *Entry:* `{live_price}`\n🔴 *SL:* `{sl_val}`\n🎯 *TP:* `{tp_val}`\n🧭 *Trend:* `{daily_trend}`\n⏰ *Time:* `{now}` IST"
-                    send_telegram(msg)
-
-                elif daily_trend == "BEARISH" and live_price > eq_4h_50 and (is_4h_bear_fvg or high_4h_sweep) and curr_close_15m < recent_15m_low:
-                    sl_val = round(df_15m['High'].iloc[-4:].max() + buffer_15m, 5)
-                    tp_val = round(low_20, 5)
-                    msg = f"🔻 *ENGINE 2: 4H SWING (SELL)*\n\n🔹 *Pair:* `{pair}`\n🟢 *Entry:* `{live_price}`\n🔴 *SL:* `{sl_val}`\n🎯 *TP:* `{tp_val}`\n🧭 *Trend:* `{daily_trend}`\n⏰ *Time:* `{now}` IST"
-                    send_telegram(msg)
-
-            time.sleep(1.2)
+            time.sleep(1.0)
         except Exception as e:
             print(f"Error on {pair}: {e}")
+            continue
 
     print("✅ Swing scan completed successfully.")
 
 if __name__ == "__main__":
-    scan_market()
+    main()
