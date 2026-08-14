@@ -2,7 +2,7 @@ name: SMC Swing Trading Bot
 
 on:
   schedule:
-    # Runs automatically every 15 minutes 24/7
+    # Runs automatically every 15 minutes
     - cron: '*/15 * * * *'
   workflow_dispatch:
 
@@ -22,7 +22,7 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install yfinance pandas numpy requests
+          pip install tradingview-ta requests
 
       - name: Run Swing Bot
         run: |
