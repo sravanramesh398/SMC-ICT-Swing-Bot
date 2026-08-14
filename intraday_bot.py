@@ -1,0 +1,29 @@
+name: SMC Intraday Scanner Bot
+
+on:
+  schedule:
+    # Runs automatically every 5 minutes 24/7
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run-intraday:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests tradingview-ta
+
+      - name: Run Intraday Bot
+        run: |
+          python intraday_bot.py
