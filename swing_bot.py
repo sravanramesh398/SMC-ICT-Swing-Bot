@@ -14,22 +14,22 @@ MAJOR_PAIRS = [
 ]
 
 def send_telegram_alert(pair, engine_name, direction, entry, sl, tp1, tp2, zone_info, details):
-    """Sends SMC Dual-Engine Swing Trade Telegram Alert with Deep FVG Filters"""
+    """Sends SMC Dual-Engine Swing Trade Telegram Alert with Displacement Filters"""
     if direction == "STARTUP":
         msg = f"""
-🏛️ *SMC DEEP FVG DUAL-ENGINE ACTIVE* ✅
+🏛️ *SMC DISPLACEMENT DUAL-ENGINE ACTIVE* ✅
 ───────────────────────
-⚙️ *ENGINE 1:* `Daily Deep FVG (28%/72%) ➔ 1H MSS`
-⚙️ *ENGINE 2:* `4H Deep FVG (28%/72%) ➔ 15M MSS`
+⚙️ *ENGINE 1:* `Daily Deep FVG (28%/72%) ➔ 1H MSS (Body ≥ 50%)`
+⚙️ *ENGINE 2:* `4H Deep FVG (28%/72%) ➔ 15M MSS (Body ≥ 50%)`
 🎯 *Targets:* `TP1 (1:2 RR Fixed) | TP2 (1:3 RR Fixed)`
 ⏰ *Time:* `{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} IST`
 ───────────────────────
-_Optimized for High Win-Rate & Institutional Extreme Zones!_
+_High Win-Rate Institutional Displacement Filter Applied!_
 """
     else:
         dir_icon = "🟢 *BUY SETUP*" if direction == "BUY" else "🔴 *SELL SETUP*"
         msg = f"""
-🚀 *SMC DEEP FVG TRADE ALERT* 🚀
+🚀 *SMC DISPLACEMENT TRADE ALERT* 🚀
 ───────────────────────
 📊 *Pair:* `{pair}`
 ⚡ *Engine:* `{engine_name}`
@@ -70,12 +70,12 @@ def get_data(symbol, interval):
 
 def main():
     print("==================================================================")
-    print("   🏛️ SMC DEEP FVG BOT (28% DISCOUNT / 72% PREMIUM ACTIVE)")
+    print("   🏛️ SMC DISPLACEMENT DUAL-ENGINE BOT (BODY >= 50% ACTIVE)")
     print("==================================================================")
     print(f"[{datetime.now().strftime('%H:%M:%S')} IST] Scanning 9 Pairs for High-Probability Setups...")
 
     # Startup Ping
-    send_telegram_alert("STATUS", "Deep FVG Engine", "STARTUP", 0, 0, 0, 0, "N/A", "Active")
+    send_telegram_alert("STATUS", "Displacement Dual Engine", "STARTUP", 0, 0, 0, 0, "N/A", "Active")
 
     for pair in MAJOR_PAIRS:
         try:
@@ -102,64 +102,72 @@ def main():
             h4_discount = live_price <= h4_low + (h4_high - h4_low) * 0.28
             h4_premium = live_price >= h4_low + (h4_high - h4_low) * 0.72
 
-            # --- 1-HOUR DATA ---
+            # --- 1-HOUR DATA & DISPLACEMENT CALCULATION ---
             high_1h = round(h1_ind["high"], 5)
             low_1h = round(h1_ind["low"], 5)
             open_1h = round(h1_ind["open"], 5)
             close_1h = round(h1_ind["close"], 5)
+            
+            range_1h = max(high_1h - low_1h, 0.00001)
+            body_1h = abs(close_1h - open_1h)
+            disp_1h = (body_1h / range_1h) >= 0.50  # Candle body at least 50%
 
-            # --- 15-MINUTE DATA ---
+            # --- 15-MINUTE DATA & DISPLACEMENT CALCULATION ---
             high_15m = round(m15_ind["high"], 5)
             low_15m = round(m15_ind["low"], 5)
             open_15m = round(m15_ind["open"], 5)
             close_15m = round(m15_ind["close"], 5)
+            
+            range_15m = max(high_15m - low_15m, 0.00001)
+            body_15m = abs(close_15m - open_15m)
+            disp_15m = (body_15m / range_15m) >= 0.50  # Candle body at least 50%
 
-            # Pip Buffers
+            # Pip Buffers & Risk Bounds
             pip_buffer_h1 = 0.20 if "JPY" in pair else 0.00150
             pip_buffer_m15 = 0.15 if "JPY" in pair else 0.00100
             min_risk = 0.08 if "JPY" in pair else 0.00080
             max_risk = 0.50 if "JPY" in pair else 0.00500
 
             # =============================================================
-            # 1. ENGINE 1: DAILY DEEP FVG ➔ 1H MSS + RETEST
+            # 1. ENGINE 1: DAILY DEEP FVG ➔ 1H MSS + DISPLACEMENT
             # =============================================================
-            if daily_discount and close_1h > open_1h and high_1h >= (d_high * 0.9995):
+            if daily_discount and close_1h > open_1h and high_1h >= (d_high * 0.9995) and disp_1h:
                 sl = round(low_1h - pip_buffer_h1, 5)
                 risk = round(live_price - sl, 5)
                 if min_risk <= risk <= max_risk:
                     tp1 = round(live_price + (risk * 2.0), 5)
                     tp2 = round(live_price + (risk * 3.0), 5)
-                    send_telegram_alert(pair, "ENGINE 1 (Daily Deep FVG)", "BUY", live_price, sl, tp1, tp2, f"Daily Extreme Discount ({d_low})", "Daily Deep FVG (<=28%) ➔ 1H Bullish MSS")
+                    send_telegram_alert(pair, "ENGINE 1 (Daily Deep FVG)", "BUY", live_price, sl, tp1, tp2, f"Daily Extreme Discount ({d_low})", "Daily Deep FVG (<=28%) ➔ 1H Bullish MSS + Solid Displacement (≥50%)")
                     print(f"✅ Alert Sent: {pair} ENGINE 1 BUY")
 
-            elif daily_premium and close_1h < open_1h and low_1h <= (d_low * 1.0005):
+            elif daily_premium and close_1h < open_1h and low_1h <= (d_low * 1.0005) and disp_1h:
                 sl = round(high_1h + pip_buffer_h1, 5)
                 risk = round(sl - live_price, 5)
                 if min_risk <= risk <= max_risk:
                     tp1 = round(live_price - (risk * 2.0), 5)
                     tp2 = round(live_price - (risk * 3.0), 5)
-                    send_telegram_alert(pair, "ENGINE 1 (Daily Deep FVG)", "SELL", live_price, sl, tp1, tp2, f"Daily Extreme Premium ({d_high})", "Daily Deep FVG (>=72%) ➔ 1H Bearish MSS")
+                    send_telegram_alert(pair, "ENGINE 1 (Daily Deep FVG)", "SELL", live_price, sl, tp1, tp2, f"Daily Extreme Premium ({d_high})", "Daily Deep FVG (>=72%) ➔ 1H Bearish MSS + Solid Displacement (≥50%)")
                     print(f"✅ Alert Sent: {pair} ENGINE 1 SELL")
 
             # =============================================================
-            # 2. ENGINE 2: 4H DEEP FVG ➔ 15M MSS + RETEST
+            # 2. ENGINE 2: 4H DEEP FVG ➔ 15M MSS + DISPLACEMENT
             # =============================================================
-            elif h4_discount and close_15m > open_15m and high_15m >= (h4_low + (h4_high - h4_low) * 0.22):
+            elif h4_discount and close_15m > open_15m and high_15m >= (h4_low + (h4_high - h4_low) * 0.22) and disp_15m:
                 sl = round(low_15m - pip_buffer_m15, 5)
                 risk = round(live_price - sl, 5)
                 if min_risk <= risk <= max_risk:
                     tp1 = round(live_price + (risk * 2.0), 5)
                     tp2 = round(live_price + (risk * 3.0), 5)
-                    send_telegram_alert(pair, "ENGINE 2 (4H Deep FVG)", "BUY", live_price, sl, tp1, tp2, f"4H Extreme Discount ({h4_low})", "4H Deep FVG (<=28%) ➔ 15M Bullish MSS")
+                    send_telegram_alert(pair, "ENGINE 2 (4H Deep FVG)", "BUY", live_price, sl, tp1, tp2, f"4H Extreme Discount ({h4_low})", "4H Deep FVG (<=28%) ➔ 15M Bullish MSS + Solid Displacement (≥50%)")
                     print(f"✅ Alert Sent: {pair} ENGINE 2 BUY")
 
-            elif h4_premium and close_15m < open_15m and low_15m <= (h4_low + (h4_high - h4_low) * 0.78):
+            elif h4_premium and close_15m < open_15m and low_15m <= (h4_low + (h4_high - h4_low) * 0.78) and disp_15m:
                 sl = round(high_15m + pip_buffer_m15, 5)
                 risk = round(sl - live_price, 5)
                 if min_risk <= risk <= max_risk:
                     tp1 = round(live_price - (risk * 2.0), 5)
                     tp2 = round(live_price - (risk * 3.0), 5)
-                    send_telegram_alert(pair, "ENGINE 2 (4H Deep FVG)", "SELL", live_price, sl, tp1, tp2, f"4H Extreme Premium ({h4_high})", "4H Deep FVG (>=72%) ➔ 15M Bearish MSS")
+                    send_telegram_alert(pair, "ENGINE 2 (4H Deep FVG)", "SELL", live_price, sl, tp1, tp2, f"4H Extreme Premium ({h4_high})", "4H Deep FVG (>=72%) ➔ 15M Bearish MSS + Solid Displacement (≥50%)")
                     print(f"✅ Alert Sent: {pair} ENGINE 2 SELL")
 
             time.sleep(1.0)
@@ -167,7 +175,7 @@ def main():
             print(f"Error on {pair}: {e}")
             continue
 
-    print("✅ Deep FVG Dual-Engine scan completed successfully.")
+    print("✅ Displacement Dual-Engine scan completed successfully.")
 
 if __name__ == "__main__":
     main()
