@@ -22,8 +22,8 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install streamlit requests tradingview-ta pandas numpy
+          pip install yfinance pandas numpy requests
 
       - name: Run Swing Bot
         run: |
-          python app.py
+          python swing_bot.py
