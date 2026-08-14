@@ -22,7 +22,7 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests tradingview-ta pandas numpy
+          pip install streamlit requests tradingview-ta pandas numpy
 
       - name: Run Swing Bot
         run: |
