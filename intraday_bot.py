@@ -12,17 +12,19 @@ PAIRS = [
     "EURJPY", "GBPJPY", "AUDJPY"
 ]
 
-def send_telegram_alert(pair, sweep_type, sweep_level, current_price):
-    """Sends Instant Telegram Alert for Sweeps"""
+def send_telegram_alert(pair, setup_title, session_name, sweep_level, current_price, details):
+    """Sends Clean SMC Intraday Alert with Killzone & Body Rejection Confirmation"""
     message = f"""
-🔥 *INTRADAY SET UP* 🔥
+🔥 *INTRADAY SMC SETUP* 🔥
 ───────────────────────
-📊 *Pair:* {pair}
-⚡ *Alert:* {sweep_type}
-🎯 *Sweep Level:* `{sweep_level}`
+📊 *Pair:* `{pair}`
+⚡ *Setup:* {setup_title}
+🏛️ *Session / Killzone:* `{session_name}`
+🎯 *Level Swept:* `{sweep_level}`
 💵 *Current Price:* `{current_price}`
-⏰ *Time:* {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} IST
 ───────────────────────
+🔍 *Confirmation:* `{details}`
+⏰ *Time:* {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} IST
 """
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
@@ -35,6 +37,23 @@ def send_telegram_alert(pair, sweep_type, sweep_level, current_price):
     except Exception as e:
         print(f"Telegram Send Error: {e}")
 
+def get_current_killzone():
+    """Returns active ICT Killzone (Feature 1)"""
+    now_utc = datetime.now(timezone.utc)
+    hour = now_utc.hour
+
+    # London Killzone (07:00 - 10:00 UTC | 12:30 PM - 03:30 PM IST)
+    if 7 <= hour < 10:
+        return "London Killzone 🇬🇧"
+    # New York Killzone (12:00 - 15:00 UTC | 05:30 PM - 08:30 PM IST)
+    elif 12 <= hour < 15:
+        return "New York Killzone 🇺🇸"
+    # Asian Session Range
+    elif 0 <= hour < 7:
+        return "Asian Session 🇯🇵"
+    else:
+        return "Regular Trading Hours"
+
 def get_pair_analysis(symbol):
     try:
         # Daily Data
@@ -42,21 +61,23 @@ def get_pair_analysis(symbol):
         pdh = round(h_daily.indicators["high"], 5)
         pdl = round(h_daily.indicators["low"], 5)
 
-        time.sleep(1.0)
+        time.sleep(0.8)
 
-        # 15M Data
+        # 15M Data (For Sweep & Candle Body Rejection Confirmation)
         h_15m = TA_Handler(symbol=symbol, exchange="FOREXCOM", screener="forex", interval=Interval.INTERVAL_15_MINUTES).get_analysis()
         live_price = round(h_15m.indicators["close"], 5)
+        open_15m = round(h_15m.indicators["open"], 5)
         high_15m = round(h_15m.indicators["high"], 5)
         low_15m = round(h_15m.indicators["low"], 5)
 
         return {
             "symbol": symbol,
             "price": live_price,
+            "open": open_15m,
+            "high": high_15m,
+            "low": low_15m,
             "pdh": pdh,
-            "pdl": pdl,
-            "high_15m": high_15m,
-            "low_15m": low_15m
+            "pdl": pdl
         }
     except Exception as e:
         print(f"Error fetching {symbol}: {e}")
@@ -64,11 +85,11 @@ def get_pair_analysis(symbol):
 
 def main():
     print("==================================================================")
-    print("   🤖 SMC INTRADAY SCANNER RUNNING VIA GITHUB ACTIONS")
+    print("   🤖 SMC INTRADAY BOT (KILLZONES + CANDLE REJECTION / MSS)")
     print("==================================================================")
     
-    now_utc = datetime.now(timezone.utc)
-    print(f"[{datetime.now().strftime('%H:%M:%S')} IST] Scanning 9 Pairs...")
+    session = get_current_killzone()
+    print(f"[{datetime.now().strftime('%H:%M:%S')} IST] Active Zone: {session} | Scanning 9 Pairs...")
 
     for pair in PAIRS:
         data = get_pair_analysis(pair)
@@ -76,34 +97,68 @@ def main():
             continue
 
         price = data["price"]
+        open_p = data["open"]
+        high = data["high"]
+        low = data["low"]
         pdh = data["pdh"]
         pdl = data["pdl"]
-        high_15m = data["high_15m"]
-        low_15m = data["low_15m"]
 
-        # 1. PDH / PDL SWEEPS
-        if high_15m >= pdh:
-            print(f"🚨 {pair} Swept PDH ({pdh})!")
-            send_telegram_alert(pair, "PREVIOUS DAY HIGH (PDH) SWEPT 🔴", pdh, price)
+        # -------------------------------------------------------------
+        # 1. PDH SWEEP + BODY REJECTION (BEARISH REVERSAL)
+        # High swept above PDH, but Candle Closed BELOW PDH (Wick Sweep)
+        # -------------------------------------------------------------
+        if high >= pdh and price < pdh:
+            print(f"🚨 {pair} Swept PDH with Rejection Body!")
+            send_telegram_alert(
+                pair=pair,
+                setup_title="PDH LIQUIDITY PURGED 🔴 (BEARISH REJECTION)",
+                session_name=session,
+                sweep_level=pdh,
+                current_price=price,
+                details="15M Wick swept High, but body closed back below PDH (MSS shift potential)"
+            )
 
-        elif low_15m <= pdl:
-            print(f"🚨 {pair} Swept PDL ({pdl})!")
-            send_telegram_alert(pair, "PREVIOUS DAY LOW (PDL) SWEPT 🟢", pdl, price)
+        # -------------------------------------------------------------
+        # 2. PDL SWEEP + BODY REJECTION (BULLISH REVERSAL)
+        # Low swept below PDL, but Candle Closed ABOVE PDL (Wick Sweep)
+        # -------------------------------------------------------------
+        elif low <= pdl and price > pdl:
+            print(f"🚨 {pair} Swept PDL with Rejection Body!")
+            send_telegram_alert(
+                pair=pair,
+                setup_title="PDL LIQUIDITY PURGED 🟢 (BULLISH REJECTION)",
+                session_name=session,
+                sweep_level=pdl,
+                current_price=price,
+                details="15M Wick swept Low, but body closed back above PDL (MSS shift potential)"
+            )
 
-        # 2. SESSION SWEEPS (London / NY)
-        elif 7 <= now_utc.hour < 12:
-            if high_15m >= pdh * 0.9995:
-                send_telegram_alert(pair, "ASIAN HIGH LIQUIDITY SWEPT 🔴", high_15m, price)
-            elif low_15m <= pdl * 1.0005:
-                send_telegram_alert(pair, "ASIAN LOW LIQUIDITY SWEPT 🟢", low_15m, price)
+        # -------------------------------------------------------------
+        # 3. KILLZONE HIGH/LOW SWEEP (Inside London/NY Killzones)
+        # -------------------------------------------------------------
+        elif "Killzone" in session:
+            # High Sweep during Killzone with Bearish Close
+            if high >= pdh * 0.9997 and price < open_p:
+                send_telegram_alert(
+                    pair=pair,
+                    setup_title=f"{session.split()[0]} HIGH SWEEP 🔴",
+                    session_name=session,
+                    sweep_level=high,
+                    current_price=price,
+                    details="Killzone High swept with Bearish Candle Close rejection"
+                )
+            # Low Sweep during Killzone with Bullish Close
+            elif low <= pdl * 1.0003 and price > open_p:
+                send_telegram_alert(
+                    pair=pair,
+                    setup_title=f"{session.split()[0]} LOW SWEEP 🟢",
+                    session_name=session,
+                    sweep_level=low,
+                    current_price=price,
+                    details="Killzone Low swept with Bullish Candle Close rejection"
+                )
 
-        elif 12 <= now_utc.hour < 18:
-            if high_15m >= pdh * 0.9998:
-                send_telegram_alert(pair, "LONDON HIGH LIQUIDITY SWEPT 🔴", high_15m, price)
-            elif low_15m <= pdl * 1.0002:
-                send_telegram_alert(pair, "LONDON LOW LIQUIDITY SWEPT 🟢", low_15m, price)
-
-        time.sleep(1.2)
+        time.sleep(1.0)
 
     print("✅ Scan cycle finished successfully.")
 
