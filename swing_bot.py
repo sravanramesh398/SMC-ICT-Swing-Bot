@@ -3,7 +3,9 @@ import time
 from datetime import datetime
 from tradingview_ta import TA_Handler, Interval
 
-# --- BOT CONFIGURATION ---
+# ==========================================
+# ⚙️ 1. BOT CONFIGURATION & SETTINGS
+# ==========================================
 BOT_TOKEN = "8981472233:AAHHe9boaP0hsfZIcROcvMEmrF1Z-ymfSUg"
 CHAT_ID = "458226949"
 
@@ -13,47 +15,68 @@ MAJOR_PAIRS = [
     "EURJPY", "GBPJPY", "AUDJPY"
 ]
 
-def send_telegram_alert(pair, engine_name, direction, entry, sl, tp, zone_info, details):
-    """Sends SMC Pure 1:2 RR Swing Trade Alert with Displacement Filters"""
+# Pair-specific SL buffers and thresholds
+PAIR_CONFIG = {
+    'EURUSD': {'buffer': 0.00150, 'min_sl': 0.00080, 'max_sl': 0.00350},
+    'GBPUSD': {'buffer': 0.00250, 'min_sl': 0.00100, 'max_sl': 0.00400},
+    'AUDUSD': {'buffer': 0.00150, 'min_sl': 0.00080, 'max_sl': 0.00350},
+    'USDCAD': {'buffer': 0.00150, 'min_sl': 0.00080, 'max_sl': 0.00350},
+    'NZDUSD': {'buffer': 0.00150, 'min_sl': 0.00080, 'max_sl': 0.00350},
+    'USDJPY': {'buffer': 0.20,    'min_sl': 0.080,   'max_sl': 0.450},
+    'EURJPY': {'buffer': 0.20,    'min_sl': 0.080,   'max_sl': 0.450},
+    'GBPJPY': {'buffer': 0.25,    'min_sl': 0.100,   'max_sl': 0.500},
+    'AUDJPY': {'buffer': 0.20,    'min_sl': 0.080,   'max_sl': 0.450},
+}
+
+DISPLACEMENT_THRESHOLD = 0.50  # Minimum 50% candle body for MSS confirmation
+
+# ==========================================
+# 📲 2. TELEGRAM ALERT DISPATCHER
+# ==========================================
+def send_telegram_alert(pair, direction, entry, sl, tp, step_details):
+    """Sends 4-Step SMC Trade Alert"""
     if direction == "STARTUP":
         msg = f"""
-🏛️ *SMC DUAL-ENGINE (PURE 1:2 RR) ACTIVE* ✅
+🏛️ <b>SMC 4-STEP STRATEGY BOT ACTIVE</b> ✅
 ───────────────────────
-⚙️ *ENGINE 1:* `Daily Deep FVG (28%/72%) ➔ 1H MSS (Body ≥ 50%)`
-⚙️ *ENGINE 2:* `4H Deep FVG (28%/72%) ➔ 15M MSS (Body ≥ 50%)`
-🎯 *Target:* `Fixed 1:2 RR Target`
-⏰ *Time:* `{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} IST`
+1️⃣ <b>HTF Bias:</b> Daily/4H Trend & POI
+2️⃣ <b>Liquidity:</b> PDH/PDL Sweep
+3️⃣ <b>LTF Shift:</b> 15M/5M CHoCH (Body ≥ 50%)
+4️⃣ <b>Entry:</b> Mitigation + Pure 1:2 RR
+⏰ <b>Time:</b> <code>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} IST</code>
 ───────────────────────
-_High-Probability Institutional Setup Live!_
+<i>Institutional Order Flow Engine Live!</i>
 """
     else:
-        dir_icon = "🟢 *BUY SETUP*" if direction == "BUY" else "🔴 *SELL SETUP*"
+        dir_icon = "🟢 <b>BUY SETUP</b>" if direction == "BUY" else "🔴 <b>SELL SETUP</b>"
         msg = f"""
-🚀 *SMC TRADE ALERT (PURE 1:2 RR)* 🚀
+🚀 <b>SMC 4-STEP TRADE ALERT</b> 🚀
 ───────────────────────
-📊 *Pair:* `{pair}`
-⚡ *Engine:* `{engine_name}`
-🧭 *Direction:* {dir_icon}
-🎯 *Extreme Zone:* `{zone_info}`
+📊 <b>Pair:</b> <code>{pair}</code>
+🧭 <b>Action:</b> {dir_icon}
 ───────────────────────
-💵 *Entry Price:* `{entry}`
-🛑 *Stop Loss (SL):* `{sl}`
-🎯 *Take Profit (1:2 RR):* `{tp}`
+💵 <b>Entry Price:</b> <code>{entry:.5f}</code>
+🛑 <b>Stop Loss (SL):</b> <code>{sl:.5f}</code>
+🎯 <b>Take Profit (1:2 RR):</b> <code>{tp:.5f}</code>
 ───────────────────────
-📋 *CONFIRMATION:* {details}
-💡 *Management:* Pure 1:2 Risk to Reward Target.
+📋 <b>4-STEP VERIFICATION:</b>
+{step_details}
 ───────────────────────
-⏰ *Time:* {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} IST
+💡 <b>Rule:</b> Move SL to Break-Even at +1 R profit.
+⏰ <b>Time:</b> <code>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} IST</code>
 """
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}
+    payload = {"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}
     try:
         requests.post(url, json=payload, timeout=10)
     except Exception as e:
         print(f"Telegram Send Error: {e}")
 
+# ==========================================
+# 📊 3. DATA FETCHER
+# ==========================================
 def get_data(symbol, interval):
-    """Safely fetch market data using TradingView TA"""
+    """Fetches real-time candle data via TradingView TA"""
     try:
         handler = TA_Handler(
             symbol=symbol,
@@ -67,110 +90,109 @@ def get_data(symbol, interval):
         print(f"Fetch Error {symbol} on {interval}: {e}")
         return None
 
+# ==========================================
+# 🧠 4. CORE SMC SCANNER (THE 4 STEPS)
+# ==========================================
 def main():
     print("==================================================================")
-    print("   🏛️ SMC PURE 1:2 RR DUAL-ENGINE BOT (BODY >= 50% ACTIVE)")
+    print("   🏛️ SMC 4-STEP STRATEGY SCANNER RUNNING")
     print("==================================================================")
-    print(f"[{datetime.now().strftime('%H:%M:%S')} IST] Scanning 9 Pairs for High-Probability Setups...")
+    print(f"[{datetime.now().strftime('%H:%M:%S')} IST] Scanning 9 Pairs...")
 
-    # Startup Ping
-    send_telegram_alert("STATUS", "Pure 1:2 Dual Engine", "STARTUP", 0, 0, 0, "N/A", "Active")
+    # Send startup message
+    send_telegram_alert("STATUS", "STARTUP", 0, 0, 0, "")
 
     for pair in MAJOR_PAIRS:
         try:
-            # Multi-Timeframe Data (Daily, 4H, 1H, 15M)
+            # Multi-timeframe fetch: Daily (HTF Bias/Liquidity), 4H (POI), 15M (LTF Execution)
             d_ind = get_data(pair, Interval.INTERVAL_1_DAY)
             h4_ind = get_data(pair, Interval.INTERVAL_4_HOURS)
-            h1_ind = get_data(pair, Interval.INTERVAL_1_HOUR)
             m15_ind = get_data(pair, Interval.INTERVAL_15_MINUTES)
 
-            if not d_ind or not h4_ind or not h1_ind or not m15_ind:
+            if not d_ind or not h4_ind or not m15_ind:
                 continue
 
+            cfg = PAIR_CONFIG.get(pair, PAIR_CONFIG['EURUSD'])
+            buffer = cfg['buffer']
+            min_sl = cfg['min_sl']
+            max_sl = cfg['max_sl']
+
             live_price = round(m15_ind["close"], 5)
-            
-            # --- DAILY DEEP EXTREME ZONES (<= 28% & >= 72%) ---
-            d_high = round(d_ind["high"], 5)
-            d_low = round(d_ind["low"], 5)
-            daily_discount = live_price <= d_low + (d_high - d_low) * 0.28
-            daily_premium = live_price >= d_low + (d_high - d_low) * 0.72
 
-            # --- 4-HOUR DEEP EXTREME ZONES (<= 28% & >= 72%) ---
-            h4_high = round(h4_ind["high"], 5)
-            h4_low = round(h4_ind["low"], 5)
-            h4_discount = live_price <= h4_low + (h4_high - h4_low) * 0.28
-            h4_premium = live_price >= h4_low + (h4_high - h4_low) * 0.72
+            # -------------------------------------------------------------
+            # STEP 1: HTF Trend & Bias (Daily / 4H)
+            # -------------------------------------------------------------
+            d_open = round(d_ind["open"], 5)
+            d_close = round(d_ind["close"], 5)
+            d_high = round(d_ind["high"], 5)    # PDH (Buy-side Liquidity)
+            d_low = round(d_ind["low"], 5)      # PDL (Sell-side Liquidity)
 
-            # --- 1-HOUR DATA & DISPLACEMENT ---
-            high_1h = round(h1_ind["high"], 5)
-            low_1h = round(h1_ind["low"], 5)
-            open_1h = round(h1_ind["open"], 5)
-            close_1h = round(h1_ind["close"], 5)
-            
-            range_1h = max(high_1h - low_1h, 0.00001)
-            body_1h = abs(close_1h - open_1h)
-            disp_1h = (body_1h / range_1h) >= 0.50
+            h4_open = round(h4_ind["open"], 5)
+            h4_close = round(h4_ind["close"], 5)
 
-            # --- 15-MINUTE DATA & DISPLACEMENT ---
-            high_15m = round(m15_ind["high"], 5)
-            low_15m = round(m15_ind["low"], 5)
-            open_15m = round(m15_ind["open"], 5)
-            close_15m = round(m15_ind["close"], 5)
-            
-            range_15m = max(high_15m - low_15m, 0.00001)
-            body_15m = abs(close_15m - open_15m)
-            disp_15m = (body_15m / range_15m) >= 0.50
+            is_htf_bullish = (d_close >= d_open) or (h4_close >= h4_open)
+            is_htf_bearish = (d_close <= d_open) or (h4_close <= h4_open)
 
-            # Pip Buffers & Risk Limits
-            pip_buffer_h1 = 0.20 if "JPY" in pair else 0.00150
-            pip_buffer_m15 = 0.15 if "JPY" in pair else 0.00100
-            min_risk = 0.08 if "JPY" in pair else 0.00080
-            max_risk = 0.50 if "JPY" in pair else 0.00500
+            # -------------------------------------------------------------
+            # STEP 2: Liquidity Sweep Verification
+            # -------------------------------------------------------------
+            # Sell-side Liquidity Sweep (Swept PDL and closed back above)
+            m15_low = round(m15_ind["low"], 5)
+            m15_high = round(m15_ind["high"], 5)
+            m15_open = round(m15_ind["open"], 5)
+            m15_close = round(m15_ind["close"], 5)
 
-            # =============================================================
-            # 1. ENGINE 1: DAILY DEEP FVG ➔ 1H MSS + DISPLACEMENT
-            # =============================================================
-            if daily_discount and close_1h > open_1h and high_1h >= (d_high * 0.9995) and disp_1h:
-                sl = round(low_1h - pip_buffer_h1, 5)
+            swept_ssl = (m15_low <= d_low) and (live_price > d_low)
+            swept_bsl = (m15_high >= d_high) and (live_price < d_high)
+
+            # -------------------------------------------------------------
+            # STEP 3: LTF Confirmation (CHoCH / MSS + 50% Displacement)
+            # -------------------------------------------------------------
+            range_15m = max(m15_high - m15_low, 0.00001)
+            body_15m = abs(m15_close - m15_open)
+            has_displacement = (body_15m / range_15m) >= DISPLACEMENT_THRESHOLD
+
+            # -------------------------------------------------------------
+            # STEP 4: Mitigation Entry & Pure 1:2 Risk Management
+            # -------------------------------------------------------------
+            # 🟢 BUY SETUP
+            if is_htf_bullish and swept_ssl and (m15_close > m15_open) and has_displacement:
+                sl = round(m15_low - buffer, 5)
                 risk = round(live_price - sl, 5)
-                if min_risk <= risk <= max_risk:
+
+                if min_sl <= risk <= max_sl:
                     tp = round(live_price + (risk * 2.0), 5)
-                    send_telegram_alert(pair, "ENGINE 1 (Daily Deep FVG)", "BUY", live_price, sl, tp, f"Daily Extreme Discount ({d_low})", "Daily Deep FVG (<=28%) ➔ 1H Bullish MSS + Body ≥ 50%")
-                    print(f"✅ Alert Sent: {pair} ENGINE 1 BUY")
+                    step_log = (
+                        f"• <b>Step 1 (HTF):</b> Daily/4H Bullish Structure\n"
+                        f"• <b>Step 2 (Sweep):</b> PDL Swept at <code>{d_low:.5f}</code>\n"
+                        f"• <b>Step 3 (Shift):</b> 15M Bullish CHoCH (Body ≥ 50%)\n"
+                        f"• <b>Step 4 (Entry):</b> Bullish Mitigation (Pure 1:2 RR)"
+                    )
+                    send_telegram_alert(pair, "BUY", live_price, sl, tp, step_log)
+                    print(f"✅ Alert Sent: {pair} BUY (4-Step SMC Confirmed)")
 
-            elif daily_premium and close_1h < open_1h and low_1h <= (d_low * 1.0005) and disp_1h:
-                sl = round(high_1h + pip_buffer_h1, 5)
+            # 🔴 SELL SETUP
+            elif is_htf_bearish and swept_bsl and (m15_close < m15_open) and has_displacement:
+                sl = round(m15_high + buffer, 5)
                 risk = round(sl - live_price, 5)
-                if min_risk <= risk <= max_risk:
-                    tp = round(live_price - (risk * 2.0), 5)
-                    send_telegram_alert(pair, "ENGINE 1 (Daily Deep FVG)", "SELL", live_price, sl, tp, f"Daily Extreme Premium ({d_high})", "Daily Deep FVG (>=72%) ➔ 1H Bearish MSS + Body ≥ 50%")
-                    print(f"✅ Alert Sent: {pair} ENGINE 1 SELL")
 
-            # =============================================================
-            # 2. ENGINE 2: 4H DEEP FVG ➔ 15M MSS + DISPLACEMENT
-            # =============================================================
-            elif h4_discount and close_15m > open_15m and high_15m >= (h4_low + (h4_high - h4_low) * 0.22) and disp_15m:
-                sl = round(low_15m - pip_buffer_m15, 5)
-                risk = round(live_price - sl, 5)
-                if min_risk <= risk <= max_risk:
-                    tp = round(live_price + (risk * 2.0), 5)
-                    send_telegram_alert(pair, "ENGINE 2 (4H Deep FVG)", "BUY", live_price, sl, tp, f"4H Extreme Discount ({h4_low})", "4H Deep FVG (<=28%) ➔ 15M Bullish MSS + Body ≥ 50%")
-                    print(f"✅ Alert Sent: {pair} ENGINE 2 BUY")
-
-            elif h4_premium and close_15m < open_15m and low_15m <= (h4_low + (h4_high - h4_low) * 0.78) and disp_15m:
-                sl = round(high_15m + pip_buffer_m15, 5)
-                risk = round(sl - live_price, 5)
-                if min_risk <= risk <= max_risk:
+                if min_sl <= risk <= max_sl:
                     tp = round(live_price - (risk * 2.0), 5)
-                    send_telegram_alert(pair, "ENGINE 2 (4H Deep FVG)", "SELL", live_price, sl, tp, f"4H Extreme Premium ({h4_high})", "4H Deep FVG (>=72%) ➔ 15M Bearish MSS + Body ≥ 50%")
-                    print(f"✅ Alert Sent: {pair} ENGINE 2 SELL")
+                    step_log = (
+                        f"• <b>Step 1 (HTF):</b> Daily/4H Bearish Structure\n"
+                        f"• <b>Step 2 (Sweep):</b> PDH Swept at <code>{d_high:.5f}</code>\n"
+                        f"• <b>Step 3 (Shift):</b> 15M Bearish CHoCH (Body ≥ 50%)\n"
+                        f"• <b>Step 4 (Entry):</b> Bearish Mitigation (Pure 1:2 RR)"
+                    )
+                    send_telegram_alert(pair, "SELL", live_price, sl, tp, step_log)
+                    print(f"✅ Alert Sent: {pair} SELL (4-Step SMC Confirmed)")
 
             time.sleep(1.0)
         except Exception as e:
-            print(f"Error on {pair}: {e}")
+            print(f"Error scanning {pair}: {e}")
             continue
 
-    print("✅ Pure 1:2 RR Dual-Engine scan completed successfully.")
+    print("✅ 4-Step SMC Scan finished successfully.")
 
 if __name__ == "__main__":
     main()
